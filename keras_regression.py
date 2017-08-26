@@ -4,75 +4,125 @@
 import numpy
 import pandas
 import time
-from keras.models import Sequential
+import argparse
+import logging
+import sys
+from keras.models import Sequential, save_model, load_model
 from keras.layers import Dense
 from keras.wrappers.scikit_learn import KerasRegressor
 from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-import logging
 
 __author__ = 'hhemken'
 log = logging.getLogger(__file__)
+
+
+class KerasRegressionException(Exception):
+    """
+    Generic exception to be raikeras_regression within the KerasRegression class.
+    """
+
+    def __init__(self, msg):
+        log.exception(msg)
+        super(KerasRegressionException, self).__init__(msg)
 
 
 class KerasRegression(object):
     """
     """
 
-    def __init__(self, inputs, outputs, hidden_layers):
+    KFOLD_BATCH_SIZE = 10
+    KFOLD_NUM_EPOCHS = 100
+    KFOLD_NUM_SPLITS = 25
+
+    def __init__(self, seed=42,
+                 data_file_path=None,
+                 output_dir='.',
+                 num_ann_inputs=0,
+                 num_ann_outputs=0,
+                 hidden_layers=None,
+                 session_name='anonymous_keras_run'):
         """
 
-        """
-        self.inputs = inputs
-        self.outputs = outputs
+       :param seed:
+       :param data_file_path:
+       """
+        self.inputs = num_ann_inputs
+        self.outputs = num_ann_outputs
+        self.data_file_path = data_file_path
+        self.output_dir = output_dir
         self.hidden_layers = hidden_layers[:]
+        self.session_name = session_name
         self.model = None
+        self.seed = seed
+        numpy.random.seed(self.seed)
+        self.x = None
+        self.y = None
 
     def model_creator(self):
         # create model
         self.model = Sequential()
-        # self.model.add(Dense(self.inputs, input_dim=self.inputs, init='normal', activation='relu'))
-        self.model.add(Dense(self.inputs, kernel_initializer="normal", activation="relu"))
+        self.model.add(Dense(self.inputs, input_dim=self.inputs, kernel_initializer="normal", activation="relu"))
         for hidden_layer_size in self.hidden_layers:
-            self.model.add(Dense(hidden_layer_size, init='normal', activation='relu'))
-        # self.model.add(Dense(self.outputs, init='normal'))
-        self.model.add(Dense(self.outputs, kernel_initializer="normal"))
+            self.model.add(
+                Dense(hidden_layer_size, input_dim=hidden_layer_size, kernel_initializer='normal', activation='relu'))
+        # output layer
+        self.model.add(Dense(self.outputs, input_dim=self.outputs, kernel_initializer="normal"))
         # Compile model
         self.model.compile(loss='mean_squared_error', optimizer='adam')
         return self.model
 
-    def run(self, seed, data_file_path):
+    def basic_cross_validation(self):
         """
 
-        :param seed:
-        :param data_file_path:
         :return:
         """
-        numpy.random.seed(seed)
-        estimators = []
-        dataframe = pandas.read_csv(data_file_path, delim_whitespace=True, header=None)
+        kfold = KFold(n_splits=self.KFOLD_NUM_SPLITS, random_state=self.seed)
+        cvscores = []
+        for train, test in kfold.split(self.x, self.y):
+            # create model
+            self.model = Sequential()
+            self.model.add(Dense(self.inputs, input_dim=self.inputs, kernel_initializer="normal", activation="relu"))
+            for hidden_layer_size in self.hidden_layers:
+                self.model.add(Dense(hidden_layer_size, input_dim=hidden_layer_size, kernel_initializer='normal',
+                                     activation='relu'))
+            # output layer
+            self.model.add(Dense(self.outputs, input_dim=self.outputs, kernel_initializer="normal"))
+            # Compile model
+            self.model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+            # Fit the model
+            self.model.fit(self.x[train], self.y[train], epochs=self.KFOLD_NUM_EPOCHS, batch_size=self.KFOLD_BATCH_SIZE,
+                           verbose=1)
+            # evaluate the model
+            scores = self.model.evaluate(self.x[test], self.y[test], verbose=1)
+            log.info("%s: %.2f%%", self.model.metrics_names[1], scores[1] * 100)
+            cvscores.append(scores[1] * 100)
+            # save model to HDF5
+            model_file_path = "{}/{}-model.hdf5".format(self.output_dir, self.session_name)
+            save_model(self.model, model_file_path)
+            log.info("Saved model to %s", model_file_path)
+        log.info("avg cross validation score %.2f%% (+/- %.2f%%)", numpy.mean(cvscores), numpy.std(cvscores))
+
+    def run(self):
+        """
+
+        :return:
+        """
+        dataframe = pandas.read_csv(self.data_file_path, delim_whitespace=True, header=None)
         dataset = dataframe.values
         # split into input (X) and output (Y) variables
-        X = dataset[:, 0:self.inputs]
+        self.x = dataset[:, 0:self.inputs]
+        # Y data are at end of each row
+        # notation: http://structure.usc.edu/numarray/node26.html
         if self.outputs > 1:
-            Y = dataset[:, self.inputs:self.inputs + self.outputs]
+            # get columns self.inputs to self.inputs + self.outputs fom matrix of data
+            self.y = dataset[:, self.inputs:self.inputs + self.outputs]
         else:
-            Y = dataset[:, self.inputs]
-        estimators.append(('standardize', StandardScaler()))
-        estimators.append(('mlp', KerasRegressor(build_fn=self.model_creator, nb_epoch=50, batch_size=5, verbose=1)))
-        pipeline = Pipeline(estimators)
-        kfold = KFold(n_splits=10, random_state=seed)
-        results = cross_val_score(pipeline, X, Y, cv=kfold)
-        log.info("\nResult: %.2f (%.2f) MSE" % (results.mean(), results.std()))
-        # serialize model to JSON
-        model_json = self.model.to_json()
-        with open("model.json", "w") as json_file:
-            json_file.write(model_json)
-        # serialize weights to HDF5
-        self.model.save_weights("model.h5")
-        print("Saved model to disk")
+            # get column self.inputs from matrix of data
+            self.y = dataset[:, self.inputs]
+        self.basic_cross_validation()
 
 
 def test_housing():
@@ -84,22 +134,14 @@ def test_housing():
     inputs = 13
     outputs = 1
     hidden_layers = [6]
-    keras_reg = KerasRegression(inputs, outputs, hidden_layers)
     random_seed = 7
-    keras_reg.run(random_seed, "housing.csv")
-
-
-def test_trade_forecast():
-    """
-
-    :return:
-    """
-    inputs = 10
-    outputs = 2
-    hidden_layers = [10, 10, 10, 10, 10, 10]
-    keras_reg = KerasRegression(inputs, outputs, hidden_layers)
-    random_seed = time.time()
-    keras_reg.run(random_seed, "datasets/trade_forecast/tickers-12.dat")
+    keras_reg = KerasRegression(seed=random_seed,
+                                num_ann_inputs=inputs,
+                                num_ann_outputs=outputs,
+                                data_file_path="test_datasets/housing.csv",
+                                hidden_layers=hidden_layers,
+                                session_name='housing')
+    keras_reg.run()
 
 
 def test_mushroom():
@@ -111,17 +153,81 @@ def test_mushroom():
     inputs = 125
     outputs = 2
     hidden_layers = [150, 75]
-    keras_reg = KerasRegression(inputs, outputs, hidden_layers)
     random_seed = 7
-    keras_reg.run(random_seed, "mushroom_train-output_last.csv")
+    keras_reg = KerasRegression(seed=random_seed,
+                                num_ann_inputs=inputs,
+                                num_ann_outputs=outputs,
+                                data_file_path="test_datasets/mushroom_train-output_last.csv",
+                                hidden_layers=hidden_layers,
+                                session_name='mushroom')
+    keras_reg.run()
 
 
 if __name__ == '__main__':
-    quote_data_log_format = ("%(asctime)s.%(msecs)03d %(levelname)-06s: " +
-                             "%(module)s::%(funcName)s:%(lineno)s: %(message)s")
-    quote_data_log_datefmt = "%Y-%m-%dT%H:%M:%S"
+    log_format = ("%(asctime)s.%(msecs)03d [%(process)d] %(threadName)s: %(levelname)-06s: " +
+                  "%(module)s::%(funcName)s:%(lineno)s: %(message)s")
+    log_datefmt = "%Y-%m-%dT%H:%M:%S"
     logging.basicConfig(level=logging.DEBUG,
-                        format=quote_data_log_format,
-                        datefmt=quote_data_log_datefmt)
+                        format=log_format,
+                        datefmt=log_datefmt)
 
-    test_trade_forecast()
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument('--data_file_path', default=False,
+                               help="Path of JSON data file.")
+    parent_parser.add_argument('--output_dir', default=False,
+                               help="Directory in which output files will be written.")
+    parent_parser.add_argument('--num_ann_inputs', default=False,
+                               help="Have another option on the command line.")
+    parent_parser.add_argument('--num_ann_outputs', default=False,
+                               help="Have another option on the command line.")
+    parent_parser.add_argument('--num_input_files', default=False,
+                               help="Have another option on the command line.")
+    parent_parser.add_argument('--hidden_layers', default=False,
+                               help="JSON representation of a list of hidden layer sizes.")
+    parent_parser.add_argument('--session_name', default=False,
+                               help="Name of the session, used to name saved models and outputs.")
+    parser = argparse.ArgumentParser(add_help=False)
+    subparsers = parser.add_subparsers(dest='command')
+    # test_mushroom command line command
+    test_mushroom_parser = subparsers.add_parser('test_mushroom', parents=[parent_parser],
+                                                 help="Will run test_mushroom.")
+    # test_housing command line command
+    test_housing_parser = subparsers.add_parser('test_housing', parents=[parent_parser], help="Will run test_housing.")
+    # write_data_set command line command
+    write_data_set_parser = subparsers.add_parser('run_mlp', parents=[parent_parser],
+                                                  help="Will run mlp using input parameters.")
+
+    args = parser.parse_args()
+    log.info('args: %s', str(args))
+
+    exit_code = 1
+    try:
+        if args.command == 'test_mushroom':
+            log.info("running test_mushroom")
+            test_mushroom()
+        if args.command == 'test_housing':
+            log.info("running test_housing")
+            test_housing()
+        elif args.command == 'run_mlp':
+            log.info("data file path   %s", args.data_file_path)
+            log.info("output directory %s", args.output_dir)
+            log.info("num_ann_inputs   %s", args.num_ann_inputs)
+            log.info("num_ann_outputs  %s", args.num_ann_outputs)
+            log.info("hidden_layers    %s", args.hidden_layers)
+            log.info("session_name     %s", args.session_name)
+            keras_regression = KerasRegression(data_file_path=args.data_file_path,
+                                               output_dir=args.output_dir,
+                                               num_ann_inputs=args.num_ann_inputs,
+                                               num_ann_outputs=args.num_ann_outputs,
+                                               hidden_layers=args.hidden_layers,
+                                               session_name=args.session_name)
+            keras_regression.run()
+
+        exit_code = 0
+    except KerasRegressionException as keras_regression_exception:
+        log.exception(keras_regression_exception)
+    except Exception as generic_exception:
+        logging.exception(generic_exception)
+    finally:
+        logging.shutdown()
+        sys.exit(exit_code)
