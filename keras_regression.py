@@ -7,6 +7,7 @@ import time
 import argparse
 import logging
 import sys
+import json
 from keras.models import Sequential, save_model, load_model
 from keras.layers import Dense
 from keras.wrappers.scikit_learn import KerasRegressor
@@ -34,8 +35,8 @@ class KerasRegression(object):
     """
 
     KFOLD_BATCH_SIZE = 10
-    KFOLD_NUM_EPOCHS = 100
-    KFOLD_NUM_SPLITS = 25
+    KFOLD_NUM_EPOCHS = 10
+    KFOLD_NUM_SPLITS = 5
 
     def __init__(self, seed=42,
                  data_file_path=None,
@@ -80,7 +81,9 @@ class KerasRegression(object):
         :return:
         """
         kfold = KFold(n_splits=self.KFOLD_NUM_SPLITS, random_state=self.seed)
-        cvscores = []
+        cvscores = list()
+        model_cv_scores = list()
+        split_num = 1
         for train, test in kfold.split(self.x, self.y):
             # create model
             self.model = Sequential()
@@ -98,12 +101,18 @@ class KerasRegression(object):
             # evaluate the model
             scores = self.model.evaluate(self.x[test], self.y[test], verbose=1)
             log.info("%s: %.2f%%", self.model.metrics_names[1], scores[1] * 100)
-            cvscores.append(scores[1] * 100)
+            current_cv_score = scores[1] * 100
+            cvscores.append(current_cv_score)
             # save model to HDF5
-            model_file_path = "{}/{}-model.hdf5".format(self.output_dir, self.session_name)
+            model_file_path = "{}/{}-split-{}-model.hdf5".format(self.output_dir, self.session_name, str(split_num))
             save_model(self.model, model_file_path)
             log.info("Saved model to %s", model_file_path)
+            model_cv_scores.append((model_file_path, str(current_cv_score)))
+            split_num += 1
         log.info("avg cross validation score %.2f%% (+/- %.2f%%)", numpy.mean(cvscores), numpy.std(cvscores))
+        log.info("model     cv score")
+        for model_file, cv_score in model_cv_scores:
+            log.info("{} {}".format(model_file, cv_score))
 
     def run(self):
         """
@@ -209,17 +218,19 @@ if __name__ == '__main__':
             log.info("running test_housing")
             test_housing()
         elif args.command == 'run_mlp':
-            log.info("data file path   %s", args.data_file_path)
-            log.info("output directory %s", args.output_dir)
-            log.info("num_ann_inputs   %s", args.num_ann_inputs)
-            log.info("num_ann_outputs  %s", args.num_ann_outputs)
-            log.info("hidden_layers    %s", args.hidden_layers)
-            log.info("session_name     %s", args.session_name)
+            log.info("data file path       %s", args.data_file_path)
+            log.info("output directory     %s", args.output_dir)
+            log.info("num_ann_inputs       %s", args.num_ann_inputs)
+            log.info("num_ann_outputs      %s", args.num_ann_outputs)
+            log.info("session_name         %s", args.session_name)
+            log.info("hidden_layers string %s", args.hidden_layers)
+            actual_hidden_layers = json.loads(args.hidden_layers)
+            log.info("hidden_layers        %s", str(actual_hidden_layers))
             keras_regression = KerasRegression(data_file_path=args.data_file_path,
                                                output_dir=args.output_dir,
-                                               num_ann_inputs=args.num_ann_inputs,
-                                               num_ann_outputs=args.num_ann_outputs,
-                                               hidden_layers=args.hidden_layers,
+                                               num_ann_inputs=int(args.num_ann_inputs),
+                                               num_ann_outputs=int(args.num_ann_outputs),
+                                               hidden_layers=actual_hidden_layers,
                                                session_name=args.session_name)
             keras_regression.run()
 
