@@ -44,7 +44,7 @@ class KerasRegression(object):
                  num_ann_inputs=0,
                  num_ann_outputs=0,
                  hidden_layers=None,
-                 session_name='anonymous_keras_run'):
+                 session_name='anonymous_mlp_run'):
         """
 
        :param seed:
@@ -62,19 +62,6 @@ class KerasRegression(object):
         self.x = None
         self.y = None
 
-    def model_creator(self):
-        # create model
-        self.model = Sequential()
-        self.model.add(Dense(self.inputs, input_dim=self.inputs, kernel_initializer="normal", activation="relu"))
-        for hidden_layer_size in self.hidden_layers:
-            self.model.add(
-                Dense(hidden_layer_size, input_dim=hidden_layer_size, kernel_initializer='normal', activation='relu'))
-        # output layer
-        self.model.add(Dense(self.outputs, input_dim=self.outputs, kernel_initializer="normal"))
-        # Compile model
-        self.model.compile(loss='mean_squared_error', optimizer='adam')
-        return self.model
-
     def basic_cross_validation(self):
         """
 
@@ -87,16 +74,27 @@ class KerasRegression(object):
         for train, test in kfold.split(self.x, self.y):
             # create model
             self.model = Sequential()
-            self.model.add(Dense(self.inputs, input_dim=self.inputs, kernel_initializer="normal", activation="relu"))
+            self.model.add(Dense(self.inputs,
+                                 input_dim=self.inputs,
+                                 kernel_initializer="normal",
+                                 activation="relu"))
             for hidden_layer_size in self.hidden_layers:
-                self.model.add(Dense(hidden_layer_size, input_dim=hidden_layer_size, kernel_initializer='normal',
+                self.model.add(Dense(hidden_layer_size,
+                                     input_dim=hidden_layer_size,
+                                     kernel_initializer='normal',
                                      activation='relu'))
             # output layer
-            self.model.add(Dense(self.outputs, input_dim=self.outputs, kernel_initializer="normal"))
+            self.model.add(Dense(self.outputs,
+                                 input_dim=self.outputs,
+                                 kernel_initializer="normal",
+                                 activation='relu'))
             # Compile model
             self.model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
             # Fit the model
-            self.model.fit(self.x[train], self.y[train], epochs=self.KFOLD_NUM_EPOCHS, batch_size=self.KFOLD_BATCH_SIZE,
+            self.model.fit(self.x[train],
+                           self.y[train],
+                           epochs=self.KFOLD_NUM_EPOCHS,
+                           batch_size=self.KFOLD_BATCH_SIZE,
                            verbose=1)
             # evaluate the model
             scores = self.model.evaluate(self.x[test], self.y[test], verbose=1)
@@ -126,10 +124,10 @@ class KerasRegression(object):
         # Y data are at end of each row
         # notation: http://structure.usc.edu/numarray/node26.html
         if self.outputs > 1:
-            # get columns self.inputs to self.inputs + self.outputs fom matrix of data
+            # get columns from column index self.inputs to column index self.inputs + self.outputs fom matrix of data
             self.y = dataset[:, self.inputs:self.inputs + self.outputs]
         else:
-            # get column self.inputs from matrix of data
+            # get column at column indexself.inputs from matrix of data
             self.y = dataset[:, self.inputs]
         self.basic_cross_validation()
 
