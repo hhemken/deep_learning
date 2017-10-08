@@ -22,7 +22,7 @@ log = logging.getLogger(__file__)
 
 class KerasRegressionException(Exception):
     """
-    Generic exception to be raikeras_regression within the KerasRegression class.
+    Generic exception to be raised within the KerasRegression class.
     """
 
     def __init__(self, msg):
@@ -34,8 +34,8 @@ class KerasRegression(object):
     """
     """
 
-    KFOLD_BATCH_SIZE = 10
-    KFOLD_NUM_EPOCHS = 10
+    KFOLD_BATCH_SIZE = 100000
+    KFOLD_NUM_EPOCHS = 500
     KFOLD_NUM_SPLITS = 5
 
     def __init__(self, seed=42,
@@ -71,37 +71,43 @@ class KerasRegression(object):
         cvscores = list()
         model_cv_scores = list()
         split_num = 1
+        log.info('do a round of training and testing')
         for train, test in kfold.split(self.x, self.y):
-            # create model
+            log.info('create model')
             self.model = Sequential()
             self.model.add(Dense(self.inputs,
                                  input_dim=self.inputs,
                                  kernel_initializer="normal",
                                  activation="relu"))
+            log.info('add hidden layers')
             for hidden_layer_size in self.hidden_layers:
                 self.model.add(Dense(hidden_layer_size,
                                      input_dim=hidden_layer_size,
                                      kernel_initializer='normal',
                                      activation='relu'))
-            # output layer
+            log.info('add output layer')
             self.model.add(Dense(self.outputs,
                                  input_dim=self.outputs,
                                  kernel_initializer="normal",
                                  activation='relu'))
-            # Compile model
+            log.info('compile the model')
             self.model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-            # Fit the model
-            self.model.fit(self.x[train],
-                           self.y[train],
-                           epochs=self.KFOLD_NUM_EPOCHS,
-                           batch_size=self.KFOLD_BATCH_SIZE,
-                           verbose=1)
-            # evaluate the model
+            log.info('fit the model')
+            log.info('    epochs:     %d', self.KFOLD_NUM_EPOCHS)
+            log.info('    batch_size: %d', self.KFOLD_BATCH_SIZE)
+            history = self.model.fit(self.x[train],
+                                     self.y[train],
+                                     epochs=self.KFOLD_NUM_EPOCHS,
+                                     batch_size=self.KFOLD_BATCH_SIZE,
+                                     verbose=1)
+            log.info('history: %s', str(history))
+            log.info('\nevaluate the model')
             scores = self.model.evaluate(self.x[test], self.y[test], verbose=1)
             log.info("%s: %.2f%%", self.model.metrics_names[1], scores[1] * 100)
-            current_cv_score = scores[1] * 100
+            current_cv_score = scores[1] * 100.0
+            log.info('current cv score: %.3f', current_cv_score)
             cvscores.append(current_cv_score)
-            # save model to HDF5
+            log.info('save model to HDF5')
             model_file_path = "{}/{}-split-{}-model.hdf5".format(self.output_dir, self.session_name, str(split_num))
             save_model(self.model, model_file_path)
             log.info("Saved model to %s", model_file_path)
@@ -117,18 +123,24 @@ class KerasRegression(object):
 
         :return:
         """
+        log.info('create dataframe')
         dataframe = pandas.read_csv(self.data_file_path, delim_whitespace=True, header=None)
+        log.info('get dataframe values')
         dataset = dataframe.values
-        # split into input (X) and output (Y) variables
+        log.info('split into input (X) and output (Y) variables')
         self.x = dataset[:, 0:self.inputs]
+        log.info('get Y data')
         # Y data are at end of each row
         # notation: http://structure.usc.edu/numarray/node26.html
         if self.outputs > 1:
             # get columns from column index self.inputs to column index self.inputs + self.outputs fom matrix of data
+            log.info('> 1 outputs')
             self.y = dataset[:, self.inputs:self.inputs + self.outputs]
         else:
-            # get column at column indexself.inputs from matrix of data
+            # get column at column index self.inputs from matrix of data
+            log.info('1 output')
             self.y = dataset[:, self.inputs]
+        log.info('do basic cross validation')
         self.basic_cross_validation()
 
 
@@ -229,7 +241,8 @@ if __name__ == '__main__':
                                                num_ann_inputs=int(args.num_ann_inputs),
                                                num_ann_outputs=int(args.num_ann_outputs),
                                                hidden_layers=actual_hidden_layers,
-                                               session_name=args.session_name)
+                                               session_name=args.session_name,
+                                               seed=int(time.time()))
             keras_regression.run()
 
         exit_code = 0
