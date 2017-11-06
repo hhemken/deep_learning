@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
 Describe what this module does
@@ -22,6 +22,7 @@ import random
 import logging
 import sys
 import os
+import glob
 import argparse
 import numpy as np
 
@@ -81,13 +82,16 @@ class TradeForecastData(object):
         :return:
         """
         self.ticker_data = dict()
-        for data_file in os.scandir(path=data_dir):
-            log.info('%s', data_file)
-            log.info('file name %s', os.path.basename(data_file.path))
-            ticker = os.path.splitext(os.path.basename(data_file.path))[0]
-            log.info('ticker    %s', ticker)
+        # for data_file in os.scandir(path=data_dir):
+        for data_file in os.listdir(data_dir):
+            log.info('data file %s', data_file)
+            # log.info('file name %s', os.path.basename(data_file.path))
+            ticker, file_extension = os.path.splitext(os.path.basename(data_file))
+            log.info('ticker         %s, file_extension %s', ticker, file_extension)
             self.ticker_data[ticker] = dict()
-            with open(data_file.path, 'r') as f:
+            data_file_path = data_dir + '/' + data_file
+            log.info('data_file_path %s', data_file_path)
+            with open(data_file_path, 'r') as f:
                 pct_change_data = json.load(f)
                 log.info('%s has %d entries', data_file, len(pct_change_data))
                 self.ticker_data[ticker]['data'] = dict()
